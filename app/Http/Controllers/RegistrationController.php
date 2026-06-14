@@ -252,4 +252,158 @@ class RegistrationController extends Controller
             ], 500);
         }
     }
+
+    public function dropCourse($registeredID)
+    {
+        try {
+            return DB::transaction(function () use ($registeredID) {
+                $registration = RegisteredCourse::find($registeredID);
+
+                if (!$registration) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Registration not found.'
+                    ], 404);
+                }
+
+                $submissionID = $registration->submissionID;
+                $lab = LabSection::find($registration->labID);
+
+                if ($lab && $lab->current_capacity > 0) {
+                    $affectedRows = DB::update(
+                        'UPDATE lab_sections SET current_capacity = current_capacity - 1 WHERE labID = ?',
+                        [$registration->labID]
+                    );
+
+                    if ($affectedRows === 0) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'Database Error: Could not update lab capacity'
+                        ], 500);
+                    }
+                }
+
+                $registration->delete();
+
+                $remainingCourses = RegisteredCourse::where('submissionID', $submissionID)->count();
+                $submission = RegistrationSubmission::find($submissionID);
+
+                if ($submission) {
+                    if ($remainingCourses === 0 && in_array($submission->overall_status, ['Pending', 'Pending Edit'])) {
+                        $submission->delete();
+                    } else if ($submission->overall_status === 'Pending Edit') {
+                        $submission->rejection_reason = null;
+                        $submission->touch();
+                    }
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Course dropped successfully.'
+                ]);
+            });
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function updateLabSection(Request $request, $registeredID)
+    {
+        try {
+            return DB::transaction(function () use ($request, $registeredID) {
+                $newLabID = $request->input('new_lab_id');
+                $record = RegisteredCourse::find($registeredID);
+
+                if (!$record) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Registration not found'
+                    ]);
+                }
+
+                if ($record->labID == $newLabID) {
+                    return response()->json(['success' => true]);
+                }
+
+                $newLab = LabSection::find($newLabID);
+
+                if (!$newLab) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Lab section not found'
+                    ]);
+                }
+
+                if ($newLab->current_capacity >= $newLab->max_capacity) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'This section is fully booked!'
+                    ]);
+                }
+
+                DB::update(
+                    'UPDATE lab_sections SET current_capacity = current_capacity - 1 WHERE labID = ? AND current_capacity > 0',
+                    [$record->labID]
+                );
+
+                DB::update(
+                    'UPDATE lab_sections SET current_capacity = current_capacity + 1 WHERE labID = ?',
+                    [$newLabID]
+                );
+
+                $record->labID = $newLabID;
+                $record->save();
+
+                $submission = RegistrationSubmission::find($record->submissionID);
+
+                if ($submission && $submission->overall_status === 'Pending Edit') {
+                    $submission->rejection_reason = null;
+                    $submission->touch();
+                }
+
+                return response()->json(['success' => true]);
+            });
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function submitRegistration($studentID)
+    {
+        try {
+            $submission = RegistrationSubmission::where('studentID', $studentID)
+                ->whereIn('overall_status', ['Pending', 'Pending Edit'])
+                ->first();
+
+            if ($submission) {
+                $submission->overall_status = 'Pending Review';
+                $submission->rejection_reason = null;
+                $submission->save();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Successfully submitted for review!'
+                ]);
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => 'No active draft found to submit.'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
 }
