@@ -18,7 +18,7 @@ return new class extends Migration
         $table->string('student_id', 15);
         $table->decimal('amount', 10, 2);
         $table->string('payment_method', 100); 
-        $table->string('status', 50); // success, failed, pending
+        $table->string('status',50)->default('PENDING');
         $table->string('transaction_ref', 100)->unique();
         $table->string('failure_reason', 200)->nullable();
         $table->timestamp('paid_at')->nullable();

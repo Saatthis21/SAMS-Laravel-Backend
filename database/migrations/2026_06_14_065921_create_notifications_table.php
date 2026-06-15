@@ -14,7 +14,7 @@ return new class extends Migration
     Schema::create('notifications', function (Blueprint $table) {
         $table->string('notification_id', 100)->primary();
         $table->string('student_id', 15);
-        $table->string('message', 100);
+        $table->string('message',255);
         $table->string('type', 50); // reminder, block alert, payment failure, payment confirm
         $table->timestamp('sent_at')->nullable();
         $table->timestamps();

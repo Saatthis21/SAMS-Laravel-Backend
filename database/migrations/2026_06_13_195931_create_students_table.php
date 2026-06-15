@@ -18,6 +18,7 @@ return new class extends Migration
         $table->string('student_course', 100);
         $table->string('password', 255);
         $table->timestamps(); // Automatically handles created_at and updated_at
+        
     });
 }
     /**

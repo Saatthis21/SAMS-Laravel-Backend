@@ -18,8 +18,8 @@ return new class extends Migration
         $table->string('semester', 20);
         $table->decimal('total_fee', 10, 2);
         $table->decimal('paid_amount', 10, 2)->default(0.00);
-        $table->decimal('balance', 10, 2);
-        $table->string('status', 50); // unpaid, partial, paid
+        $table->decimal('balance',10,2)->default(0.00);
+        $table->string('status',50)->default('UNPAID');
         $table->integer('deadline_week');
         $table->timestamps();
 
