@@ -41,6 +41,16 @@ class RegistrationController extends Controller
             $submission = RegistrationSubmission::where('studentID', $studentID)
                 ->whereIn('overall_status', ['Pending', 'Pending Edit'])
                 ->first();
+            if ($submission) {
+                // Check if the cart is actually empty
+                $courseCount = DB::table('registered_course')->where('submissionID', $submission->submissionID)->count();
+
+            if ($courseCount == 0 && $submission->overall_status == 'Pending Edit') {
+                    $submission->overall_status = 'Pending';
+                    $submission->rejection_reason = null;
+                    $submission->save();
+                }
+            }
 
             if (!$submission) {
                 $submission = new RegistrationSubmission();
@@ -206,11 +216,7 @@ class RegistrationController extends Controller
                 ->join('lab_sections', 'registered_course.labID', '=', 'lab_sections.labID')
                 ->where('registration_submissions.studentID', $studentID)
                 ->whereIn('registration_submissions.overall_status', [
-                    'Pending',
-                    'Pending Review',
-                    'Pending Edit',
-                    'Confirmed',
-                    'Rejected'
+                    'Pending', 'Pending Review', 'Pending Edit', 'Confirmed', 'Rejected'
                 ])
                 ->select(
                     'registered_course.registeredID',
@@ -219,9 +225,23 @@ class RegistrationController extends Controller
                     'courses.credit_hours',
                     'lab_sections.lab_num',
                     'lab_sections.time',
-                    'registration_submissions.overall_status as status'
+                    'registration_submissions.overall_status as status',
+                    // --- 1. GRAB THE TIMESTAMPS ---
+                    'registered_course.created_at as course_created_at',
+                    'registration_submissions.updated_at as cart_updated_at'
                 )
                 ->get();
+
+            // --- 2. THE SMART LOGIC ---
+            // Loop through the courses to separate the "New" ones from the "Rejected" ones
+            foreach ($myCourses as $course) {
+                if ($course->status === 'Pending Edit') {
+                    // If the course was added AFTER the cart was rejected, it is a brand new course!
+                    if (strtotime($course->course_created_at) > strtotime($course->cart_updated_at)) {
+                        $course->status = 'Pending';
+                    }
+                }
+            }
 
             $totalCredits = $myCourses->sum('credit_hours');
             $balance = 20 - $totalCredits;
@@ -293,7 +313,10 @@ class RegistrationController extends Controller
                         $submission->delete();
                     } else if ($submission->overall_status === 'Pending Edit') {
                         $submission->rejection_reason = null;
-                        $submission->touch();
+                        // --- THE FIX: Freeze the clock ---
+                        $submission->timestamps = false;
+                        $submission->save();
+                        // ---------------------------------
                     }
                 }
 
@@ -371,7 +394,10 @@ class RegistrationController extends Controller
 
                 if ($submission && $submission->overall_status === 'Pending Edit') {
                     $submission->rejection_reason = null;
-                    $submission->touch();
+                    // --- THE FIX: Freeze the clock ---
+                    $submission->timestamps = false; 
+                    $submission->save();
+                    // ---------------------------------
                 }
 
                 return response()->json(['success' => true]);
@@ -551,13 +577,38 @@ class RegistrationController extends Controller
         ->select('lab_sections.date', 'lab_sections.time', 'lab_sections.date_2', 'lab_sections.time_2')
         ->get();
 
+        \Log::info("Checking new lab: " . $newLab->date . " " . $newLab->time);
+        \Log::info("Against existing: " . $existingLabs->toJson());
+
     foreach ($existingLabs as $ex) {
-        if (($newLab->date == $ex->date && $newLab->time == $ex->time) ||
-            (!empty($newLab->date_2) && $newLab->date_2 == $ex->date && $newLab->time_2 == $ex->time) ||
-            (!empty($ex->date_2) && $newLab->date == $ex->date_2 && $newLab->time == $ex->time_2)) {
-            return true; 
+    // 1. Helper: Convert "10:00:00" to minutes (e.g., 600)
+    $newStart = $this->timeToMinutes($newLab->time);
+    $exStart = $this->timeToMinutes($ex->time);
+    
+    // Assume all classes are 120 minutes (2 hours). Adjust if yours are different!
+    $duration = 120; 
+
+    // 2. Check for overlap on the same day
+    if ($newLab->date == $ex->date) {
+        if (!($newStart + $duration <= $exStart || $newStart >= $exStart + $duration)) {
+            return true; // Overlap detected!
         }
     }
-    return false;
+    
+    // 3. Repeat for date_2 if it exists...
+    if (!empty($newLab->date_2) && !empty($ex->date_2) && $newLab->date_2 == $ex->date_2) {
+        $newStart2 = $this->timeToMinutes($newLab->time_2);
+        $exStart2 = $this->timeToMinutes($ex->time_2);
+        if (!($newStart2 + $duration <= $exStart2 || $newStart2 >= $exStart2 + $duration)) {
+            return true;
+        }
+    }
 }
+        return false;
+    }
+
+    private function timeToMinutes($timeString) {
+        $parts = explode(':', $timeString);
+        return ((int)$parts[0] * 60) + (int)$parts[1];
+    }
 }
