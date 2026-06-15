@@ -3,6 +3,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\RegistrationController;
+use App\Http\Controllers\AttendanceController;
 
 Route::get('/setup-account', [App\Http\Controllers\AuthController::class, 'setupMyAccount']);
 Route::post('/login', [App\Http\Controllers\AuthController::class, 'login']);
@@ -22,3 +23,11 @@ Route::post('/notify-faculty/{studentID}', [RegistrationController::class, 'subm
 Route::get('/pending-registrations', [RegistrationController::class, 'fetchPendingSubmissions']);
 Route::get('/review-submission/{submissionID}', [RegistrationController::class, 'fetchSubmissionDetails']);
 Route::post('/review-decision', [RegistrationController::class, 'processReviewDecision']);
+
+// Manage Student Attendance Routes (SAMS-PACK-3XX)
+Route::prefix('attendance')->group(function () {
+    Route::post('/initiateSession', [AttendanceController::class, 'initiateSession']);
+    Route::post('/checkIn', [AttendanceController::class, 'checkIn']);
+    Route::get('/getAttendanceReport', [AttendanceController::class, 'getAttendanceReport']);
+    Route::post('/exportSessionData', [AttendanceController::class, 'exportSessionData']);
+});
