@@ -4,6 +4,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\RegistrationController;
 use App\Http\Controllers\AttendanceController;
+use App\Http\Controllers\ReportController;
 
 Route::get('/setup-account', [App\Http\Controllers\AuthController::class, 'setupMyAccount']);
 Route::post('/login', [App\Http\Controllers\AuthController::class, 'login']);
@@ -30,4 +31,9 @@ Route::prefix('attendance')->group(function () {
     Route::post('/checkIn', [AttendanceController::class, 'checkIn']);
     Route::get('/getAttendanceReport', [AttendanceController::class, 'getAttendanceReport']);
     Route::post('/exportSessionData', [AttendanceController::class, 'exportSessionData']);
+});
+
+// Manage Report Module (SAMS-PACK-5XX)
+Route::prefix('reports')->group(function () {
+    Route::post('/generate', [ReportController::class, 'generateReport']);
 });
