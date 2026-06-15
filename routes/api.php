@@ -16,8 +16,8 @@ Route::get('/courses', [RegistrationController::class, 'fetchAvailableCourses'])
 Route::get('/courses/{course_code}/labs', [RegistrationController::class, 'fetchCourseLabs']);
 Route::post('/add-course', [RegistrationController::class, 'addCourseToDraft']);
 Route::get('/my-courses/{studentID}', [RegistrationController::class, 'getMyCourses']);
-Route::delete('/drop-course/{registeredID}', [RegistrationController::class, 'dropCourse']);
-Route::put('/update-lab/{registeredID}', [RegistrationController::class, 'updateLabSection']);
+Route::delete('/drop-course/{registeredID}', [RegistrationController::class, 'dropCourseFromDraft']);
+Route::post('/change-lab/{registeredID}', [RegistrationController::class, 'changeLabSection']);
 Route::post('/notify-faculty/{studentID}', [RegistrationController::class, 'submitRegistration']);
 Route::get('/pending-registrations', [RegistrationController::class, 'fetchPendingSubmissions']);
 Route::get('/review-submission/{submissionID}', [RegistrationController::class, 'fetchSubmissionDetails']);

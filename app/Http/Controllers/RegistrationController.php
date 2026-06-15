@@ -253,7 +253,7 @@ class RegistrationController extends Controller
         }
     }
 
-    public function dropCourse($registeredID)
+    public function dropCourseFromDraft($registeredID)
     {
         try {
             return DB::transaction(function () use ($registeredID) {
@@ -311,12 +311,21 @@ class RegistrationController extends Controller
         }
     }
 
-    public function updateLabSection(Request $request, $registeredID)
+    public function changeLabSection(Request $request, $registeredID)
     {
         try {
             return DB::transaction(function () use ($request, $registeredID) {
                 $newLabID = $request->input('new_lab_id');
                 $record = RegisteredCourse::find($registeredID);
+
+                $newLab = LabSection::find($newLabID);
+
+                if ($this->checkTimetableClash($record->submissionID, $newLab, $registeredID)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Timetable clash detected with your existing courses.'
+                ], 400);
+            }
 
                 if (!$record) {
                     return response()->json([
@@ -532,4 +541,23 @@ class RegistrationController extends Controller
             ], 500);
         }
     }
+
+    private function checkTimetableClash($submissionID, $newLab, $excludeRegisteredID = null)
+{
+    $existingLabs = DB::table('registered_course')
+        ->join('lab_sections', 'registered_course.labID', '=', 'lab_sections.labID')
+        ->where('registered_course.submissionID', $submissionID)
+        ->where('registered_course.registeredID', '!=', $excludeRegisteredID)
+        ->select('lab_sections.date', 'lab_sections.time', 'lab_sections.date_2', 'lab_sections.time_2')
+        ->get();
+
+    foreach ($existingLabs as $ex) {
+        if (($newLab->date == $ex->date && $newLab->time == $ex->time) ||
+            (!empty($newLab->date_2) && $newLab->date_2 == $ex->date && $newLab->time_2 == $ex->time) ||
+            (!empty($ex->date_2) && $newLab->date == $ex->date_2 && $newLab->time == $ex->time_2)) {
+            return true; 
+        }
+    }
+    return false;
+}
 }
