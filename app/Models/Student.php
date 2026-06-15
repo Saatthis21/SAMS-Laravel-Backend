@@ -18,4 +18,10 @@ class Student extends Authenticatable
         'student_course', 
         'password'
     ];
+
+    public static function getProfile($studentID)
+    {
+        $student = self::where('studentID', $studentID)->first();
+        return $student; 
+    }
 }

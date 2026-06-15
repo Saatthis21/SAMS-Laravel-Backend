@@ -41,6 +41,16 @@ class RegistrationController extends Controller
             $submission = RegistrationSubmission::where('studentID', $studentID)
                 ->whereIn('overall_status', ['Pending', 'Pending Edit'])
                 ->first();
+            if ($submission) {
+                // Check if the cart is actually empty
+                $courseCount = DB::table('registered_course')->where('submissionID', $submission->submissionID)->count();
+
+            if ($courseCount == 0 && $submission->overall_status == 'Pending Edit') {
+                    $submission->overall_status = 'Pending';
+                    $submission->rejection_reason = null;
+                    $submission->save();
+                }
+            }
 
             if (!$submission) {
                 $submission = new RegistrationSubmission();
@@ -206,11 +216,7 @@ class RegistrationController extends Controller
                 ->join('lab_sections', 'registered_course.labID', '=', 'lab_sections.labID')
                 ->where('registration_submissions.studentID', $studentID)
                 ->whereIn('registration_submissions.overall_status', [
-                    'Pending',
-                    'Pending Review',
-                    'Pending Edit',
-                    'Confirmed',
-                    'Rejected'
+                    'Pending', 'Pending Review', 'Pending Edit', 'Confirmed', 'Rejected'
                 ])
                 ->select(
                     'registered_course.registeredID',
@@ -219,9 +225,23 @@ class RegistrationController extends Controller
                     'courses.credit_hours',
                     'lab_sections.lab_num',
                     'lab_sections.time',
-                    'registration_submissions.overall_status as status'
+                    'registration_submissions.overall_status as status',
+                    // --- 1. GRAB THE TIMESTAMPS ---
+                    'registered_course.created_at as course_created_at',
+                    'registration_submissions.updated_at as cart_updated_at'
                 )
                 ->get();
+
+            // --- 2. THE SMART LOGIC ---
+            // Loop through the courses to separate the "New" ones from the "Rejected" ones
+            foreach ($myCourses as $course) {
+                if ($course->status === 'Pending Edit') {
+                    // If the course was added AFTER the cart was rejected, it is a brand new course!
+                    if (strtotime($course->course_created_at) > strtotime($course->cart_updated_at)) {
+                        $course->status = 'Pending';
+                    }
+                }
+            }
 
             $totalCredits = $myCourses->sum('credit_hours');
             $balance = 20 - $totalCredits;
@@ -251,5 +271,344 @@ class RegistrationController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    public function dropCourseFromDraft($registeredID)
+    {
+        try {
+            return DB::transaction(function () use ($registeredID) {
+                $registration = RegisteredCourse::find($registeredID);
+
+                if (!$registration) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Registration not found.'
+                    ], 404);
+                }
+
+                $submissionID = $registration->submissionID;
+                $lab = LabSection::find($registration->labID);
+
+                if ($lab && $lab->current_capacity > 0) {
+                    $affectedRows = DB::update(
+                        'UPDATE lab_sections SET current_capacity = current_capacity - 1 WHERE labID = ?',
+                        [$registration->labID]
+                    );
+
+                    if ($affectedRows === 0) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'Database Error: Could not update lab capacity'
+                        ], 500);
+                    }
+                }
+
+                $registration->delete();
+
+                $remainingCourses = RegisteredCourse::where('submissionID', $submissionID)->count();
+                $submission = RegistrationSubmission::find($submissionID);
+
+                if ($submission) {
+                    if ($remainingCourses === 0 && in_array($submission->overall_status, ['Pending', 'Pending Edit'])) {
+                        $submission->delete();
+                    } else if ($submission->overall_status === 'Pending Edit') {
+                        $submission->rejection_reason = null;
+                        // --- THE FIX: Freeze the clock ---
+                        $submission->timestamps = false;
+                        $submission->save();
+                        // ---------------------------------
+                    }
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Course dropped successfully.'
+                ]);
+            });
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function changeLabSection(Request $request, $registeredID)
+    {
+        try {
+            return DB::transaction(function () use ($request, $registeredID) {
+                $newLabID = $request->input('new_lab_id');
+                $record = RegisteredCourse::find($registeredID);
+
+                $newLab = LabSection::find($newLabID);
+
+                if ($this->checkTimetableClash($record->submissionID, $newLab, $registeredID)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Timetable clash detected with your existing courses.'
+                ], 400);
+            }
+
+                if (!$record) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Registration not found'
+                    ]);
+                }
+
+                if ($record->labID == $newLabID) {
+                    return response()->json(['success' => true]);
+                }
+
+                $newLab = LabSection::find($newLabID);
+
+                if (!$newLab) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Lab section not found'
+                    ]);
+                }
+
+                if ($newLab->current_capacity >= $newLab->max_capacity) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'This section is fully booked!'
+                    ]);
+                }
+
+                DB::update(
+                    'UPDATE lab_sections SET current_capacity = current_capacity - 1 WHERE labID = ? AND current_capacity > 0',
+                    [$record->labID]
+                );
+
+                DB::update(
+                    'UPDATE lab_sections SET current_capacity = current_capacity + 1 WHERE labID = ?',
+                    [$newLabID]
+                );
+
+                $record->labID = $newLabID;
+                $record->save();
+
+                $submission = RegistrationSubmission::find($record->submissionID);
+
+                if ($submission && $submission->overall_status === 'Pending Edit') {
+                    $submission->rejection_reason = null;
+                    // --- THE FIX: Freeze the clock ---
+                    $submission->timestamps = false; 
+                    $submission->save();
+                    // ---------------------------------
+                }
+
+                return response()->json(['success' => true]);
+            });
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function submitRegistration($studentID)
+    {
+        try {
+            $submission = RegistrationSubmission::where('studentID', $studentID)
+                ->whereIn('overall_status', ['Pending', 'Pending Edit'])
+                ->first();
+
+            if ($submission) {
+                $submission->overall_status = 'Pending Review';
+                $submission->rejection_reason = null;
+                $submission->save();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Successfully submitted for review!'
+                ]);
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => 'No active draft found to submit.'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+
+    public function fetchPendingSubmissions()
+    {
+        try {
+            $submissions = RegistrationSubmission::where('overall_status', 'Pending Review')
+                ->orderBy('date', 'asc')
+                ->get();
+
+            $data = [];
+
+            foreach ($submissions as $sub) {
+                $student = DB::table('students')
+                    ->where('studentID', $sub->studentID)
+                    ->first();
+
+                $credits = DB::table('registered_course')
+                    ->join('courses', 'registered_course.course_code', '=', 'courses.course_code')
+                    ->where('registered_course.submissionID', $sub->submissionID)
+                    ->sum('courses.credit_hours');
+
+                $data[] = [
+                    'submissionID' => $sub->submissionID,
+                    'studentID' => $sub->studentID,
+                    'student_name' => $student ? $student->student_name : 'Unknown Student',
+                    'date' => date('j M', strtotime($sub->date ?? now())),
+                    'total_credits' => $credits
+                ];
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $data
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function fetchSubmissionDetails($submissionID)
+    {
+        try {
+            $submission = RegistrationSubmission::where('submissionID', $submissionID)->first();
+
+            if (!$submission) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Submission not found'
+                ], 404);
+            }
+
+            $student = DB::table('students')
+                ->where('studentID', $submission->studentID)
+                ->first();
+
+            $studentDetails = [
+                'submissionID' => $submission->submissionID,
+                'studentID' => $submission->studentID,
+                'student_name' => $student ? $student->student_name : 'Unknown Student',
+                'student_course' => $student ? $student->student_course : 'Unknown Program',
+            ];
+
+            $courses = DB::table('registered_course')
+                ->join('courses', 'registered_course.course_code', '=', 'courses.course_code')
+                ->join('lab_sections', 'registered_course.labID', '=', 'lab_sections.labID')
+                ->where('registered_course.submissionID', $submissionID)
+                ->select(
+                    'courses.course_code',
+                    'courses.course_name',
+                    'courses.credit_hours',
+                    'lab_sections.lab_num'
+                )
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'student' => $studentDetails,
+                'courses' => $courses
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function processReviewDecision(Request $request)
+    {
+        try {
+            $submissionID = $request->input('submissionID');
+            $decision = $request->input('decision');
+            $reason = $request->input('rejection_reason');
+
+            $submission = RegistrationSubmission::find($submissionID);
+
+            if (!$submission) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Submission not found'
+                ], 404);
+            }
+
+            if ($decision === 'Approve') {
+                $submission->overall_status = 'Confirmed';
+                $submission->rejection_reason = null;
+            } else if ($decision === 'Reject') {
+                $submission->overall_status = 'Pending Edit';
+                $submission->rejection_reason = $reason;
+            }
+
+            $submission->save();
+
+            return response()->json(['success' => true], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    private function checkTimetableClash($submissionID, $newLab, $excludeRegisteredID = null)
+{
+    $existingLabs = DB::table('registered_course')
+        ->join('lab_sections', 'registered_course.labID', '=', 'lab_sections.labID')
+        ->where('registered_course.submissionID', $submissionID)
+        ->where('registered_course.registeredID', '!=', $excludeRegisteredID)
+        ->select('lab_sections.date', 'lab_sections.time', 'lab_sections.date_2', 'lab_sections.time_2')
+        ->get();
+
+        \Log::info("Checking new lab: " . $newLab->date . " " . $newLab->time);
+        \Log::info("Against existing: " . $existingLabs->toJson());
+
+    foreach ($existingLabs as $ex) {
+    // 1. Helper: Convert "10:00:00" to minutes (e.g., 600)
+    $newStart = $this->timeToMinutes($newLab->time);
+    $exStart = $this->timeToMinutes($ex->time);
+    
+    // Assume all classes are 120 minutes (2 hours). Adjust if yours are different!
+    $duration = 120; 
+
+    // 2. Check for overlap on the same day
+    if ($newLab->date == $ex->date) {
+        if (!($newStart + $duration <= $exStart || $newStart >= $exStart + $duration)) {
+            return true; // Overlap detected!
+        }
+    }
+    
+    // 3. Repeat for date_2 if it exists...
+    if (!empty($newLab->date_2) && !empty($ex->date_2) && $newLab->date_2 == $ex->date_2) {
+        $newStart2 = $this->timeToMinutes($newLab->time_2);
+        $exStart2 = $this->timeToMinutes($ex->time_2);
+        if (!($newStart2 + $duration <= $exStart2 || $newStart2 >= $exStart2 + $duration)) {
+            return true;
+        }
+    }
+}
+        return false;
+    }
+
+    private function timeToMinutes($timeString) {
+        $parts = explode(':', $timeString);
+        return ((int)$parts[0] * 60) + (int)$parts[1];
     }
 }
