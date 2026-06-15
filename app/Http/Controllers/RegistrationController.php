@@ -406,4 +406,130 @@ class RegistrationController extends Controller
             ]);
         }
     }
+
+    public function fetchPendingSubmissions()
+    {
+        try {
+            $submissions = RegistrationSubmission::where('overall_status', 'Pending Review')
+                ->orderBy('date', 'asc')
+                ->get();
+
+            $data = [];
+
+            foreach ($submissions as $sub) {
+                $student = DB::table('students')
+                    ->where('studentID', $sub->studentID)
+                    ->first();
+
+                $credits = DB::table('registered_course')
+                    ->join('courses', 'registered_course.course_code', '=', 'courses.course_code')
+                    ->where('registered_course.submissionID', $sub->submissionID)
+                    ->sum('courses.credit_hours');
+
+                $data[] = [
+                    'submissionID' => $sub->submissionID,
+                    'studentID' => $sub->studentID,
+                    'student_name' => $student ? $student->student_name : 'Unknown Student',
+                    'date' => date('j M', strtotime($sub->date ?? now())),
+                    'total_credits' => $credits
+                ];
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $data
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function fetchSubmissionDetails($submissionID)
+    {
+        try {
+            $submission = RegistrationSubmission::where('submissionID', $submissionID)->first();
+
+            if (!$submission) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Submission not found'
+                ], 404);
+            }
+
+            $student = DB::table('students')
+                ->where('studentID', $submission->studentID)
+                ->first();
+
+            $studentDetails = [
+                'submissionID' => $submission->submissionID,
+                'studentID' => $submission->studentID,
+                'student_name' => $student ? $student->student_name : 'Unknown Student',
+                'student_course' => $student ? $student->student_course : 'Unknown Program',
+            ];
+
+            $courses = DB::table('registered_course')
+                ->join('courses', 'registered_course.course_code', '=', 'courses.course_code')
+                ->join('lab_sections', 'registered_course.labID', '=', 'lab_sections.labID')
+                ->where('registered_course.submissionID', $submissionID)
+                ->select(
+                    'courses.course_code',
+                    'courses.course_name',
+                    'courses.credit_hours',
+                    'lab_sections.lab_num'
+                )
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'student' => $studentDetails,
+                'courses' => $courses
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function processReviewDecision(Request $request)
+    {
+        try {
+            $submissionID = $request->input('submissionID');
+            $decision = $request->input('decision');
+            $reason = $request->input('rejection_reason');
+
+            $submission = RegistrationSubmission::find($submissionID);
+
+            if (!$submission) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Submission not found'
+                ], 404);
+            }
+
+            if ($decision === 'Approve') {
+                $submission->overall_status = 'Confirmed';
+                $submission->rejection_reason = null;
+            } else if ($decision === 'Reject') {
+                $submission->overall_status = 'Pending Edit';
+                $submission->rejection_reason = $reason;
+            }
+
+            $submission->save();
+
+            return response()->json(['success' => true], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }
