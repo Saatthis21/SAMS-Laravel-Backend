@@ -10,7 +10,14 @@ return new class extends Migration
     {
         Schema::create('attendance_sessions', function (Blueprint $table) {
             $table->id('session_id'); // BIGINT Auto-increment PK
-            $table->unsignedBigInteger('labID'); // FK to lab_sections
+
+            // --- NEW COLUMNS ADDED TO MATCH FLUTTER ---
+            $table->string('lecturer_id');
+            $table->string('subject_code');
+
+            // Kept your original labID, made it nullable just in case you need it later
+            $table->unsignedBigInteger('labID')->nullable();
+
             $table->string('session_code', 6)->unique(); // 6-character OTP
             $table->integer('duration_minutes');
             $table->dateTime('expires_at');

@@ -78,16 +78,30 @@ Route::get('/pending-registrations', [RegistrationController::class, 'fetchPendi
 Route::get('/review-submission/{submissionID}', [RegistrationController::class, 'fetchSubmissionDetails']);
 Route::post('/review-decision', [RegistrationController::class, 'processReviewDecision']);
 
-// Manage Student Attendance Routes (SAMS-PACK-3XX)
+/*
+|--------------------------------------------------------------------------
+| Manage Student Attendance Routes (SAMS-PACK-3XX)
+|--------------------------------------------------------------------------
+*/
 Route::prefix('attendance')->group(function () {
-    Route::post('/initiateSession', [AttendanceController::class, 'initiateSession']);
+    // 1. Start a new session (Lecturer)
+    Route::post('/start', [AttendanceController::class, 'startSession']);
+
+    // 2. Submit GPS Check-in (Student)
     Route::post('/checkIn', [AttendanceController::class, 'checkIn']);
-    Route::get('/getAttendanceReport', [AttendanceController::class, 'getAttendanceReport']);
-    Route::post('/exportSessionData', [AttendanceController::class, 'exportSessionData']);
-    Route::get('/attendance/count/{session_id}', [App\Http\Controllers\AttendanceController::class, 'getLiveCount']);
+
+    // 3. Fetch the Report (Lecturer) -> Double prefix removed!
+    Route::post('/getAttendanceReport', [AttendanceController::class, 'getAttendanceReport']);
+
+    // 4. Live Polling Counter (Lecturer) -> Double prefix removed!
+    Route::get('/count/{session_id}', [AttendanceController::class, 'getLiveCount']);
 });
 
-// Manage Report Module (SAMS-PACK-5XX)
+/*
+|--------------------------------------------------------------------------
+| Manage Report Module (SAMS-PACK-5XX)
+|--------------------------------------------------------------------------
+*/
 Route::prefix('reports')->group(function () {
     Route::post('/generate', [ReportController::class, 'generateReport']);
 });
