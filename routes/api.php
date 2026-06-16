@@ -26,11 +26,16 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 | Subject Registration Module
 |--------------------------------------------------------------------------
 */
-
 Route::get('/courses', [RegistrationController::class, 'fetchAvailableCourses']);
-Route::get('/courses/{course_code}/labs',[RegistrationController::class, 'fetchCourseLabs']);
-Route::post('/add-course',[RegistrationController::class, 'addCourseToDraft']);
-Route::get('/my-courses/{studentID}',[RegistrationController::class, 'getMyCourses']);
+Route::get('/courses/{course_code}/labs', [RegistrationController::class, 'fetchCourseLabs']);
+Route::post('/add-course', [RegistrationController::class, 'addCourseToDraft']);
+Route::get('/my-courses/{studentID}', [RegistrationController::class, 'getMyCourses']);
+Route::delete('/drop-course/{registeredID}', [RegistrationController::class, 'dropCourseFromDraft']);
+Route::post('/change-lab/{registeredID}', [RegistrationController::class, 'changeLabSection']);
+Route::post('/notify-faculty/{studentID}', [RegistrationController::class, 'submitRegistration']);
+Route::get('/pending-registrations', [RegistrationController::class, 'fetchPendingSubmissions']);
+Route::get('/review-submission/{submissionID}', [RegistrationController::class, 'fetchSubmissionDetails']);
+Route::post('/review-decision', [RegistrationController::class, 'processReviewDecision']);
 
 /*
 |--------------------------------------------------------------------------
@@ -66,17 +71,7 @@ Route::get('/treasury/payments',[PaymentController::class, 'getAllPayments']);
 // View Outstanding Students
 Route::get('/treasury/outstanding',[PaymentController::class, 'getOutstandingStudents']);
 Route::get('/fee/list',[PaymentController::class, 'getFeeList']);
-// 1. Course Registration SAMS routes!
-Route::get('/courses', [RegistrationController::class, 'fetchAvailableCourses']);
-Route::get('/courses/{course_code}/labs', [RegistrationController::class, 'fetchCourseLabs']);
-Route::post('/add-course', [RegistrationController::class, 'addCourseToDraft']);
-Route::get('/my-courses/{studentID}', [RegistrationController::class, 'getMyCourses']);
-Route::delete('/drop-course/{registeredID}', [RegistrationController::class, 'dropCourseFromDraft']);
-Route::post('/change-lab/{registeredID}', [RegistrationController::class, 'changeLabSection']);
-Route::post('/notify-faculty/{studentID}', [RegistrationController::class, 'submitRegistration']);
-Route::get('/pending-registrations', [RegistrationController::class, 'fetchPendingSubmissions']);
-Route::get('/review-submission/{submissionID}', [RegistrationController::class, 'fetchSubmissionDetails']);
-Route::post('/review-decision', [RegistrationController::class, 'processReviewDecision']);
+
 
 /*
 |--------------------------------------------------------------------------
