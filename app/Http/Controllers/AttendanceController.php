@@ -168,4 +168,19 @@ class AttendanceController extends Controller
             ], 500);
         }
     }
+
+    public function getLiveCount($session_id)
+    {
+        try {
+            // Count how many records exist for this specific session in the database
+            $count = StudentAttendance::where('session_id', $session_id)->count();
+
+            return response()->json([
+                'status' => 'success',
+                'count' => $count
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => 'Failed to fetch count'], 500);
+        }
+    }
 }

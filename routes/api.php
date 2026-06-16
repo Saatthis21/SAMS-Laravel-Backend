@@ -84,6 +84,7 @@ Route::prefix('attendance')->group(function () {
     Route::post('/checkIn', [AttendanceController::class, 'checkIn']);
     Route::get('/getAttendanceReport', [AttendanceController::class, 'getAttendanceReport']);
     Route::post('/exportSessionData', [AttendanceController::class, 'exportSessionData']);
+    Route::get('/attendance/count/{session_id}', [App\Http\Controllers\AttendanceController::class, 'getLiveCount']);
 });
 
 // Manage Report Module (SAMS-PACK-5XX)
