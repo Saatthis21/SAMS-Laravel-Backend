@@ -29,7 +29,7 @@ class AuthController extends Controller
         $student = Student::where('studentID', $request->student_id)->first();
 
         // 2. Check if they exist and if the password matches
-        if (!$student || $student->password !== $request->password)  {
+        if (!$student || !Hash::check($request->password, $student->password))  {
             return response()->json([
                 'success' => false, 
                 'message' => 'Wrong ID or Password!'
