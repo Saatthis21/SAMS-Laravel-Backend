@@ -104,4 +104,17 @@ Route::prefix('attendance')->group(function () {
 */
 Route::prefix('reports')->group(function () {
     Route::post('/generate', [ReportController::class, 'generateReport']);
+<<<<<<< Updated upstream
 });
+=======
+});
+
+use App\Http\Controllers\CocurriculumController;
+
+// Co-curriculum routes
+Route::get('/cocurriculum/{studentID}', [CocurriculumController::class, 'getByStudent']);
+Route::post('/cocurriculum/claim/{id}', [CocurriculumController::class, 'claimCredit']);
+Route::post('/cocurriculum/approve/{id}', [CocurriculumController::class, 'approveCredit']);
+Route::post('/cocurriculum/reject/{id}', [CocurriculumController::class, 'rejectCredit']);
+Route::get('/cocurriculum/pending/all', [CocurriculumController::class, 'getPendingClaims']);
+>>>>>>> Stashed changes
