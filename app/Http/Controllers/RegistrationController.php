@@ -41,11 +41,12 @@ class RegistrationController extends Controller
             $submission = RegistrationSubmission::where('studentID', $studentID)
                 ->whereIn('overall_status', ['Pending', 'Pending Edit'])
                 ->first();
+
             if ($submission) {
                 // Check if the cart is actually empty
                 $courseCount = DB::table('registered_course')->where('submissionID', $submission->submissionID)->count();
 
-            if ($courseCount == 0 && $submission->overall_status == 'Pending Edit') {
+                if ($courseCount == 0 && $submission->overall_status == 'Pending Edit') {
                     $submission->overall_status = 'Pending';
                     $submission->rejection_reason = null;
                     $submission->save();
@@ -122,43 +123,14 @@ class RegistrationController extends Controller
                 ], 400);
             }
 
-            $existingLabs = DB::table('registered_course')
-                ->join('lab_sections', 'registered_course.labID', '=', 'lab_sections.labID')
-                ->where('registered_course.submissionID', $activeSubmissionID)
-                ->select('lab_sections.date', 'lab_sections.time', 'lab_sections.date_2', 'lab_sections.time_2')
-                ->get();
-
-            foreach ($existingLabs as $ex) {
-                if ($newLab->date == $ex->date && $newLab->time == $ex->time) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Clash detected on ' . $newLab->date . ' at ' . $newLab->time
-                    ], 400);
-                }
-
-                if (!empty($ex->date_2) && $newLab->date == $ex->date_2 && $newLab->time == $ex->time_2) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Clash detected on ' . $newLab->date . ' at ' . $newLab->time
-                    ], 400);
-                }
-
-                if (!empty($newLab->date_2) && !empty($newLab->time_2)) {
-                    if ($newLab->date_2 == $ex->date && $newLab->time_2 == $ex->time) {
-                        return response()->json([
-                            'success' => false,
-                            'message' => 'Clash detected on ' . $newLab->date_2 . ' at ' . $newLab->time_2
-                        ], 400);
-                    }
-
-                    if (!empty($ex->date_2) && $newLab->date_2 == $ex->date_2 && $newLab->time_2 == $ex->time_2) {
-                        return response()->json([
-                            'success' => false,
-                            'message' => 'Clash detected on ' . $newLab->date_2 . ' at ' . $newLab->time_2
-                        ], 400);
-                    }
-                }
+            // --- THE FIX: Smart Clash Detection ---
+            if ($this->checkTimetableClash($activeSubmissionID, $newLab)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Timetable clash detected with an existing course in your cart.'
+                ], 400);
             }
+            // --------------------------------------
 
             DB::table('registered_course')->insert([
                 'submissionID' => $activeSubmissionID,
@@ -569,46 +541,72 @@ class RegistrationController extends Controller
     }
 
     private function checkTimetableClash($submissionID, $newLab, $excludeRegisteredID = null)
-{
-    $existingLabs = DB::table('registered_course')
-        ->join('lab_sections', 'registered_course.labID', '=', 'lab_sections.labID')
-        ->where('registered_course.submissionID', $submissionID)
-        ->where('registered_course.registeredID', '!=', $excludeRegisteredID)
-        ->select('lab_sections.date', 'lab_sections.time', 'lab_sections.date_2', 'lab_sections.time_2')
-        ->get();
+    {
+        $submission = DB::table('registration_submissions')->where('submissionID', $submissionID)->first();
+        if (!$submission) return false;
 
-        \Log::info("Checking new lab: " . $newLab->date . " " . $newLab->time);
-        \Log::info("Against existing: " . $existingLabs->toJson());
+        $studentID = $submission->studentID;
 
-    foreach ($existingLabs as $ex) {
-    // 1. Helper: Convert "10:00:00" to minutes (e.g., 600)
-    $newStart = $this->timeToMinutes($newLab->time);
-    $exStart = $this->timeToMinutes($ex->time);
-    
-    // Assume all classes are 120 minutes (2 hours). Adjust if yours are different!
-    $duration = 120; 
+        $query = DB::table('registered_course')
+            ->join('registration_submissions', 'registered_course.submissionID', '=', 'registration_submissions.submissionID')
+            ->join('lab_sections', 'registered_course.labID', '=', 'lab_sections.labID')
+            ->where('registration_submissions.studentID', $studentID)
+            ->whereIn('registration_submissions.overall_status', ['Pending', 'Pending Edit', 'Pending Review', 'Confirmed']);
 
-    // 2. Check for overlap on the same day
-    if ($newLab->date == $ex->date) {
-        if (!($newStart + $duration <= $exStart || $newStart >= $exStart + $duration)) {
-            return true; // Overlap detected!
+        if ($excludeRegisteredID !== null) {
+            $query->where('registered_course.registeredID', '!=', $excludeRegisteredID);
         }
-    }
-    
-    // 3. Repeat for date_2 if it exists...
-    if (!empty($newLab->date_2) && !empty($ex->date_2) && $newLab->date_2 == $ex->date_2) {
-        $newStart2 = $this->timeToMinutes($newLab->time_2);
-        $exStart2 = $this->timeToMinutes($ex->time_2);
-        if (!($newStart2 + $duration <= $exStart2 || $newStart2 >= $exStart2 + $duration)) {
-            return true;
+
+        $existingLabs = $query->select('lab_sections.date', 'lab_sections.time', 'lab_sections.date_2', 'lab_sections.time_2')->get();
+
+        // Kept perfectly at 120 minutes (2 Hours)
+        $duration = 120; 
+
+        $newDates = [
+            ['date' => strtolower(trim($newLab->date ?? '')), 'time' => $this->timeToMins($newLab->time ?? '')],
+            ['date' => strtolower(trim($newLab->date_2 ?? '')), 'time' => $this->timeToMins($newLab->time_2 ?? '')]
+        ];
+
+        foreach ($existingLabs as $ex) {
+            $existingDates = [
+                ['date' => strtolower(trim($ex->date ?? '')), 'time' => $this->timeToMins($ex->time ?? '')],
+                ['date' => strtolower(trim($ex->date_2 ?? '')), 'time' => $this->timeToMins($ex->time_2 ?? '')]
+            ];
+
+            foreach ($newDates as $newD) {
+                if (empty($newD['date']) || $newD['time'] === null) continue;
+
+                foreach ($existingDates as $exD) {
+                    if (empty($exD['date']) || $exD['time'] === null) continue;
+
+                    if ($newD['date'] === $exD['date']) {
+                        
+                        $start1 = $newD['time'];
+                        $end1 = $start1 + $duration;
+                        
+                        $start2 = $exD['time'];
+                        $end2 = $start2 + $duration;
+
+                        if ($start1 < $end2 && $start2 < $end1) {
+                            return true; // CLASH DETECTED!
+                        }
+                    }
+                }
+            }
         }
-    }
-}
-        return false;
+        return false; 
     }
 
-    private function timeToMinutes($timeString) {
-        $parts = explode(':', $timeString);
-        return ((int)$parts[0] * 60) + (int)$parts[1];
+    private function timeToMins($timeString) 
+    {
+        if (empty($timeString)) return null;
+        $parts = explode(':', trim($timeString));
+        if (count($parts) < 2) return null;
+        
+        $hours = (int)$parts[0];
+        $minutes = (int)$parts[1];
+        
+        return ($hours * 60) + $minutes;
     }
-}
+
+    }
