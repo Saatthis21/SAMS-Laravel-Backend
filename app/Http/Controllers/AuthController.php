@@ -29,12 +29,12 @@ class AuthController extends Controller
         $student = Student::where('studentID', $request->student_id)->first();
 
         // 2. Check if they exist and if the password matches
-        if (!$student || !Hash::check($request->password, $student->password))  {
-            return response()->json([
-                'success' => false, 
-                'message' => 'Wrong ID or Password!'
-            ]);
-        }
+        if (!$student || $request->password != $student->password) {
+    return response()->json([
+        'success' => false,
+        'message' => 'Wrong ID or Password!'
+    ]);
+}
 
         // 3. NO TOKENS! Just return "success: true" and the profile data
         return response()->json([
